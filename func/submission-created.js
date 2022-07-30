@@ -1,7 +1,8 @@
 const fetch = require("node-fetch");
 
-const { API_ENDPOINT, MAX_EMBED_FIELD_CHARS } = require("./helpers/discord-helpers.js");
+const { API_ENDPOINT, MAX_EMBED_FIELD_CHARS, MAX_EMBED_FOOTER_CHARS } = require("./helpers/discord-helpers.js");
 const { createJwt, decodeJwt } = require("./helpers/jwt-helpers.js");
+const { getBan, isBlocked } = require("./helpers/user-helpers.js");
 
 exports.handler = async function (event, context) {
     let payload;
@@ -18,47 +19,92 @@ exports.handler = async function (event, context) {
         const params = new URLSearchParams(event.body);
         payload = {
             banReason: params.get("banReason") || undefined,
-            appealText: params.get("appealText") || undefined,
-            futureActions: params.get("futureActions") || undefined,
+            banMistake: params.get("banMistake") || undefined,
+            staffMessage: params.get("staffMessage") || undefined,
+            agreementTroll: params.get("agreementTroll") || undefined,
             token: params.get("token") || undefined
         };
     }
 
     if (payload.banReason !== undefined &&
-        payload.appealText !== undefined &&
-        payload.futureActions !== undefined &&
+        payload.banMistake !== undefined &&
+        payload.staffMessage !== undefined && 
+        payload.agreementTroll !== undefined &&
         payload.token !== undefined) {
-
+        
         const userInfo = decodeJwt(payload.token);
-        const embedFields = [
-            {
-                name: "Solicitante",
-                value: `<@${userInfo.id}> (${userInfo.username}#${userInfo.discriminator})`
-            },
-            {
-                name: "¿Por qué fuiste baneado?",
-                value: payload.banReason.slice(0, MAX_EMBED_FIELD_CHARS)
-            },
-            {
-                name: "¿Por qué crees que deberías ser desbaneado?",
-                value: payload.appealText.slice(0, MAX_EMBED_FIELD_CHARS)
-            },
-            {
-                name: "¿Qué vas a hacer para evitar ser baneado en el futuro?",
-                value: payload.futureActions.slice(0, MAX_EMBED_FIELD_CHARS)
-            }
-        ];
-
-        if (process.env.GUILD_ID && !process.env.DISABLE_UNBAN_LINK) {
-            const unbanUrl = new URL("/.netlify/functions/unban", process.env.URL);
-            const unbanInfo = {
-                userId: userInfo.id
+        if (isBlocked(userInfo.id)) {
+            return {
+                statusCode: 303,
+                headers: {
+                    "Location": `/error?msg=${encodeURIComponent("You cannot submit ban appeals with this Discord account.")}`,
+                },
             };
+        }
+        
+        const message = {
+            content: `<@${userInfo.id}>`,
+            embed: {
+                title: "New ban appeal submitted!",
+                timestamp: new Date().toISOString(),
+                fields: [
+                    {
+                        name: "Submitter",
+                        value: `<@${userInfo.id}> (${userInfo.username}#${userInfo.discriminator})`
+                    },
+                    {
+                        name: "Why were you banned?",
+                        value: payload.banReason.slice(0, MAX_EMBED_FIELD_CHARS)
+                    },
+                    {
+                        name: "Do you feel your ban was a mistake? [Yes/No/Other]",
+                        value: payload.banMistake.slice(0, MAX_EMBED_FIELD_CHARS)
+                    },
+                    {
+                        name: "Is there anything you would like to say to Staff regarding your unban appeal and ban?",
+                        value: payload.staffMessage.slice(0, MAX_EMBED_FIELD_CHARS)
+                    },
+                    {
+                        name: "I acknowledge the information entered here is correct, and I consent to my unban status being moved to declined if I am found to be lying or fabricating evidence.",
+                        value: payload.agreementTroll.slice(0, MAX_EMBED_FIELD_CHARS)
+                    }
+                ]
+            }
+        }
 
-            embedFields.push({
-                name: "Acciones",
-                value: `[Aprobar apelación y desbanear al usuario](${unbanUrl.toString()}?token=${encodeURIComponent(createJwt(unbanInfo))})`
-            });
+        if (process.env.GUILD_ID) {
+            try {
+                const ban = await getBan(userInfo.id, process.env.GUILD_ID, process.env.DISCORD_BOT_TOKEN);
+                if (ban !== null && ban.reason) {
+                    message.embed.footer = {
+                        text: `Original ban reason: ${ban.reason}`.slice(0, MAX_EMBED_FOOTER_CHARS)
+                    };
+                }
+            } catch (e) {
+                console.log(e);
+            }
+
+            if (!process.env.DISABLE_UNBAN_LINK) {
+                const unbanUrl = new URL("/.netlify/functions/unban", DEPLOY_PRIME_URL);
+                const unbanInfo = {
+                    userId: userInfo.id
+                };
+    
+                message.components = [{
+                    type: 1,
+                    components: [{
+                        type: 2,
+                        style: 2,
+                        label: "Approve appeal and unban user",
+                        custom_id: "accept_stage_intial"
+                    }, {
+                        type: 2,
+                        style: 4,
+                        label: "Decline appeal",
+                        custom_id: "decline_stage_intial"
+                    }]
+                }];
+            }
         }
 
         const result = await fetch(`${API_ENDPOINT}/channels/${encodeURIComponent(process.env.APPEALS_CHANNEL)}/messages`, {
@@ -67,13 +113,7 @@ exports.handler = async function (event, context) {
                 "Content-Type": "application/json",
                 "Authorization": `Bot ${process.env.DISCORD_BOT_TOKEN}`
             },
-            body: JSON.stringify({
-                embed: {
-                    title: "Nueva solicitud de apelación recibida.",
-                    timestamp: new Date().toISOString(),
-                    fields: embedFields
-                }
-            })
+            body: JSON.stringify(message)
         });
 
         if (result.ok) {
@@ -90,7 +130,7 @@ exports.handler = async function (event, context) {
                 };
             }
         } else {
-            console.log(await result.json());
+            console.log(JSON.stringify(await result.json()));
             throw new Error("Failed to submit message");
         }
     }
@@ -99,3 +139,4 @@ exports.handler = async function (event, context) {
         statusCode: 400
     };
 }
+
