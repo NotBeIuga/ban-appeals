@@ -36,17 +36,19 @@ exports.handler = async function (event, context) {
                 value: `<@${userInfo.id}> (${userInfo.username}#${userInfo.discriminator})`
             },
             {
-                name: "¿Por qué fuiste baneado?",
+                name: "Why where you banned?",
                 value: payload.banReason.slice(0, MAX_EMBED_FIELD_CHARS)
             },
             {
-                name: "¿Por qué crees que deberías ser desbaneado?",
+                name: "Do you feel your ban was a mistake [Yes, No, other]?",
                 value: payload.appealText.slice(0, MAX_EMBED_FIELD_CHARS)
             },
             {
-                name: "¿Qué vas a hacer para evitar ser baneado en el futuro?",
+                name: "Is there anything you would like to say to staff regarding your unban/appeal?",
                 value: payload.futureActions.slice(0, MAX_EMBED_FIELD_CHARS)
-            }
+            }   
+                name: "I acknowledge the information here is correct, and I consent to my unban status being moved to declined if I am found lying or fabricated evidence?",
+                value: payload.futureActions.slice(0, MAX_EMBED_FIELD_CHARS)
         ];
 
         if (process.env.GUILD_ID && !process.env.DISABLE_UNBAN_LINK) {
